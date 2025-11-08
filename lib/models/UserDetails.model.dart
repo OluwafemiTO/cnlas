@@ -1,8 +1,4 @@
 class UserDetails {
-  final String role;
-  final String name;
-  final String email;
-
   UserDetails({
     required this.role,
     required this.name,
@@ -16,4 +12,8 @@ class UserDetails {
       email: json['email'] as String,
     );
   }
+
+  final String email;
+  final String name;
+  final String role;
 }

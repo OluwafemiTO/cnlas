@@ -6,7 +6,6 @@ import 'package:http/http.dart' as http;
 
 
 class AuthAPI {
-
   final String baseUrl = "http://localhost:3000/api/auth";
   final AuthService jwt = AuthService();
 
@@ -30,7 +29,6 @@ class AuthAPI {
       throw Exception("Failed to register: ${response.body}");
     }
   }
-
 
   Future<void> loginUser(String email, String password) async {
     final response = await http.post(

@@ -11,18 +11,17 @@ class SignupScreen extends StatefulWidget {
 }
 
 class _SignupScreenState extends State<SignupScreen> {
-  bool obscureText = true;
-
+  final authService = AuthAPI();
+  TextEditingController emailController = TextEditingController();
+  String? errorMessage;
   //controllers
   TextEditingController nameController = TextEditingController();
-  TextEditingController emailController = TextEditingController();
+
+  bool obscureText = true;
   TextEditingController passwordController = TextEditingController();
-  final GlobalKey<FormState> _signupFormKey = GlobalKey<FormState>();
-
-
-  final authService = AuthAPI();
   User? registeredUser;
-  String? errorMessage;
+
+  final GlobalKey<FormState> _signupFormKey = GlobalKey<FormState>();
 
   Future<void> _handleRegister(String name, String email, String password) async {
     try {

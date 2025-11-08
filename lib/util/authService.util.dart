@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthService {
-  final _storage = const FlutterSecureStorage();
   final _key = "jwt_token";
   final _key2 = "details";
+  final _storage = const FlutterSecureStorage();
 
   /// Save JWT securely
   Future<void> saveToken(String token) async {
@@ -20,7 +20,7 @@ class AuthService {
   Future<String?> getToken() async {
     return await _storage.read(key: _key);
   }
- 
+
   /// Retrieve JWT
   Future<String?> getDetailsInput() async {
     return await _storage.read(key: _key2);

@@ -9,17 +9,15 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  bool obscureText = true;
-
   //controllers
   TextEditingController emailController = TextEditingController();
-  TextEditingController passwordController = TextEditingController();
-  final GlobalKey<FormState> _loginFormKey = GlobalKey<FormState>();
 
+  bool obscureText = true;
+  TextEditingController passwordController = TextEditingController();
 
   final AuthAPI _authService = AuthAPI();
-  
-  
+  final GlobalKey<FormState> _loginFormKey = GlobalKey<FormState>();
+
   Future<void> _handleLogin(String email, String password) async {
     try {
       await _authService.loginUser(email, password);

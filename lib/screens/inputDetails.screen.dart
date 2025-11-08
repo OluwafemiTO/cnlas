@@ -4,7 +4,6 @@ import 'package:cnlas/util/authService.util.dart';
 import 'package:flutter/material.dart';
 
 class InputDetailsScreen extends StatefulWidget {
-
   const InputDetailsScreen({super.key, required this.email, required this.name});
 
   final String email;
@@ -15,29 +14,28 @@ class InputDetailsScreen extends StatefulWidget {
 }
 
 class _InputDetailsScreenState extends State<InputDetailsScreen> {
+  final authService = AuthAPI();
+  // Changed to empty lists that will be populated from API
+  List<String> buildings = [];
+
+  TextEditingController departmentController = TextEditingController();
+  List<String> departments = [];
+  final detailsService = DetailsApi();
+  TextEditingController emailController = TextEditingController();
+   // Loading states
+  bool isLoadingBuildings = true;
+
+  bool isLoadingDepartments = true;
+  final jwt = AuthService();
   //controllers
   TextEditingController nameController = TextEditingController();
-  TextEditingController emailController = TextEditingController();
-  TextEditingController departmentController = TextEditingController();
+
   TextEditingController officeBuildingController = TextEditingController();
   TextEditingController officeNumberController = TextEditingController();
-  final GlobalKey<FormState> _inputDetailsKey = GlobalKey<FormState>();
-
-
-  final jwt = AuthService();
-  final authService = AuthAPI();
-  final detailsService = DetailsApi();
-
   String? selectedBuilding;
   String? selectedDepartment;
 
-  // Changed to empty lists that will be populated from API
-  List<String> buildings = [];
-  List<String> departments = [];
-
-   // Loading states
-  bool isLoadingBuildings = true;
-  bool isLoadingDepartments = true;
+  final GlobalKey<FormState> _inputDetailsKey = GlobalKey<FormState>();
 
   @override
   void initState() {

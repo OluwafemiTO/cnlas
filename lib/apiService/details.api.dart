@@ -3,7 +3,6 @@ import 'package:cnlas/util/authService.util.dart';
 import 'package:http/http.dart' as http;
 
 class DetailsApi {
-
   final String baseUrl = "http://localhost:3000/api/details";
   final jwt = AuthService();
 
