@@ -16,6 +16,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'CNLAS',
       theme: AppTheme.lightTheme,       // Light mode
       darkTheme: AppTheme.darkTheme,    // Dark mode
