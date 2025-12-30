@@ -83,4 +83,30 @@ class DetailsApi {
       throw Exception('Failed to load departments: $err');
     }
   }
+
+  Future<List<Map<String, dynamic>>> getLecturersAndLocations() async {
+    try {
+      final response = await http.get(
+        Uri.parse("$baseUrl/lecturers-and-locations"),
+      );
+      
+      if (response.statusCode == 200) {
+        final jsonResponse = jsonDecode(response.body);
+        
+        if (jsonResponse['success'] == true) {
+          List<dynamic> data = jsonResponse['data'];
+          // Return the full list of objects
+          print(data.map((item) => item as Map<String, dynamic>).toList());
+          return data.map((item) => item as Map<String, dynamic>).toList();
+        } else {
+          throw Exception(jsonResponse['error']['message']);
+        }
+      } else {
+        final jsonResponse = jsonDecode(response.body);
+        throw Exception(jsonResponse['error']['message'] ?? 'Failed to load data');
+      }
+    } catch (err) {
+      throw Exception('Failed to load lecturers and locations: $err');
+    }
+  }
 }
