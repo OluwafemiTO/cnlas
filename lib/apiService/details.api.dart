@@ -84,6 +84,35 @@ class DetailsApi {
     }
   }
 
+  Future<Map<String, dynamic>> getLecturerDetails(String name) async {
+  try {
+    final token = await jwt.getToken(); // Add token
+    final response = await http.post(
+      Uri.parse("$baseUrl/lecturer"),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({'name': name}),
+    );
+    
+    if (response.statusCode == 200) {
+      final jsonResponse = jsonDecode(response.body);
+      
+      if (jsonResponse['success'] == true) {
+        return jsonResponse['data'];
+      } else {
+        throw Exception(jsonResponse['error']['message']);
+      }
+    } else {
+      final jsonResponse = jsonDecode(response.body);
+      throw Exception(jsonResponse['error']['message'] ?? 'Failed to load lecturer details');
+    }
+  } catch (err) {
+    throw Exception('Failed to load lecturer details: $err');
+  }
+}
+
   Future<List<Map<String, dynamic>>> getLecturersAndLocations() async {
     try {
       final response = await http.get(

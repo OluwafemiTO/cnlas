@@ -1,9 +1,9 @@
 import 'package:cnlas/apiService/auth.api.dart';
 import 'package:cnlas/apiService/details.api.dart';
-import 'package:cnlas/models/UserDetails.model.dart';
 import 'package:cnlas/models/search.model.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -25,13 +25,19 @@ class _HomeScreenState extends State<HomeScreen> {
   List<SearchableItem> filteredItems = [];
   bool isLoadingData = false;
   TextEditingController searchController = TextEditingController();
+   // Add these for markers
+  Set<Marker> markers = {};
+  BitmapDescriptor? customMarkerIcon;
 
   @override
   void initState() {
     super.initState();
     _getName();
+    requestLocationPermission();
     _getCurrentLocation();
     _loadSearchData();
+    _loadCustomMarker(); // Load custom marker icon
+
 
     // Listen to search input
     searchController.addListener(_onSearchChanged);
@@ -85,6 +91,13 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  Future<void> _loadCustomMarker() async {
+    customMarkerIcon = await BitmapDescriptor.asset(
+      const ImageConfiguration(size: Size(48, 48)),
+      'assets/marker.png', // Optional: add your own marker icon
+    );
+  }
+
   @override
   void dispose() {
     searchController.removeListener(_onSearchChanged);
@@ -96,6 +109,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final details = await _authService.getDetails();
     name = details.name;
   }
+
+
+  Future<void> requestLocationPermission() async {
+  final status = await Permission.location.request();
+
+  if (!status.isGranted) {
+    throw Exception('Location permission denied');
+  }
+}
+
 
   // Get user's current location
   Future<void> _getCurrentLocation() async {
@@ -123,6 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Get position
       Position position = await Geolocator.getCurrentPosition();
+      print("Lat: ${position.latitude}, Lng: ${position.longitude}");
 
       setState(() {
         currentPosition = position;
@@ -154,6 +178,71 @@ class _HomeScreenState extends State<HomeScreen> {
     await authService.logout();
     if (!mounted) return;
     Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+  }
+
+  void _addMarker(SearchableItem item) {
+    final lat = item.location['lat'];
+    final lng = item.location['lng'];
+    
+    if (lat == null || lng == null) return;
+    
+    final marker = Marker(
+      markerId: MarkerId(item.id),
+      position: LatLng(lat, lng),
+      icon: customMarkerIcon ?? BitmapDescriptor.defaultMarkerWithHue(
+        item.type == 'Lecturer' 
+          ? BitmapDescriptor.hueBlue 
+          : BitmapDescriptor.hueRed,
+      ),
+      infoWindow: InfoWindow(
+        title: item.name,
+        snippet: item.type == 'Lecturer' 
+          ? item.department 
+          : item.location['abbv'],
+      ),
+      onTap: () {
+        _showDetailsBottomSheet(item);
+      },
+    );
+    
+    setState(() {
+      markers.clear(); // Clear previous markers
+      markers.add(marker);
+    });
+    
+    // Animate camera to marker
+    if (mapController != null) {
+      mapController!.animateCamera(
+        CameraUpdate.newLatLngZoom(LatLng(lat, lng), 18),
+      );
+    }
+  }
+
+  void _showDetailsBottomSheet(SearchableItem item) {
+    // Add marker when showing bottom sheet
+    _addMarker(item);
+
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _buildBottomSheetContent(item),
+    );
+  }
+
+  void _navigateToLocation(SearchableItem item) {
+    final lat = item.location['lat'];
+    final lng = item.location['lng'];
+
+    if (lat != null && lng != null && mapController != null) {
+      mapController!.animateCamera(
+        CameraUpdate.newLatLngZoom(LatLng(lat, lng), 18),
+      );
+      
+      // TODO: Add route drawing logic here
+      _showMessage('Navigating to ${item.name}');
+    }
   }
 
   Color getAvatarColor(String seed, {bool darker = false}) {
@@ -191,33 +280,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildMapLayer() {
-  //   if (isLoadingLocation || currentPosition == null) {
-  //   return const Center(child: CircularProgressIndicator());
-  // }
-    return Positioned.fill(
-      child: GoogleMap( 
-        onMapCreated: (controller) { 
-          mapController = controller; 
-        }, 
-      //   initialCameraPosition: CameraPosition(
-      //   target: LatLng(
-      //     currentPosition!.latitude,
-      //     currentPosition!.longitude,
-      //   ),
-      //   zoom: 16,
-      // ),
-      initialCameraPosition: CameraPosition(
-          target: currentPosition != null
-              ? LatLng(
-                  currentPosition!.latitude,
-                  currentPosition!.longitude,
-                )
-              : const LatLng(0, 0),
-          zoom: 16,
-        ),
-        myLocationEnabled: true, 
-        myLocationButtonEnabled: false,
+    return GoogleMap( 
+      onMapCreated: (controller) { 
+        mapController = controller; 
+      }, 
+    initialCameraPosition: CameraPosition(
+        target: currentPosition != null
+            ? LatLng(
+                currentPosition!.latitude,
+                currentPosition!.longitude,
+              )
+            : const LatLng(0, 0),
+        zoom: 16,
       ),
+      myLocationEnabled: true, 
+      myLocationButtonEnabled: false,
+      markers: markers, // Add this line to display markers
     );
   }
 
@@ -263,6 +341,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
                   searchController.clear();
                   FocusScope.of(context).unfocus();
+
+                  // Show bottom sheet instead of just navigating
+                  _showDetailsBottomSheet(item);
                 },
               );
             },
@@ -313,4 +394,205 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+
+  Widget _buildBottomSheetContent(SearchableItem item) {
+    final isLecturer = item.type == 'Lecturer';
+    
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+      ),
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Drag handle
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          
+          // Icon and Type
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 30,
+                backgroundColor: getAvatarColor(item.name),
+                child: Icon(
+                  isLecturer ? Icons.person : Icons.location_on,
+                  color: getAvatarColor(item.name, darker: true),
+                  size: 30,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      item.type,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 24),
+          const Divider(),
+          const SizedBox(height: 16),
+          
+          // Details section
+          if (isLecturer) ...[
+            // Fetch and display availability
+            FutureBuilder<Map<String, dynamic>>(
+              future: _detailService.getLecturerDetails(item.name),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: CircularProgressIndicator(),
+                    ),
+                  );
+                }
+                
+                if (snapshot.hasError) {
+                  return Text(
+                    'Error loading details',
+                    style: TextStyle(color: Colors.red[600]),
+                  );
+                }
+                
+                final data = snapshot.data!;
+                final availability = data['availability'];
+                final isAvailable = availability['status'] == 'AVAILABLE';
+                
+                return Column(
+                  children: [
+                    _buildDetailRow(
+                      Icons.email,
+                      'Email',
+                      data['Email'] ?? 'N/A',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildDetailRow(
+                      Icons.school,
+                      'Department',
+                      data['Department'] ?? 'N/A',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildDetailRow(
+                      Icons.meeting_room,
+                      'Office',
+                      '${data['Office_Building']} - ${data['Office_Number']}',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildDetailRow(
+                      Icons.circle,
+                      'Availability',
+                      availability['message'],
+                      valueColor: isAvailable ? Colors.green : Colors.red,
+                    ),
+                  ],
+                );
+              },
+            ),
+          ] else ...[
+            _buildDetailRow(
+              Icons.business,
+              'Building',
+              item.location['Office_Building'] ?? 'N/A',
+            ),
+            const SizedBox(height: 12),
+            _buildDetailRow(
+              Icons.label,
+              'Abbreviation',
+              item.location['abbv'] ?? 'N/A',
+            ),
+          ],
+          
+          const SizedBox(height: 24),
+          
+          // Directions button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _navigateToLocation(item);
+              },
+              icon: const Icon(Icons.directions),
+              label: const Text('Get Directions'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(IconData icon, String label, String value, {Color? valueColor}) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: Colors.grey[600]),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: valueColor ?? Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
 }
