@@ -1,41 +1,42 @@
 import 'dart:convert';
-import 'package:cnlas/util/authService.util.dart';
+import 'package:cnlas/config/config.dart';
+// import 'package:cnlas/util/authService.util.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class DetailsApi {
-  final String baseUrl = "http://localhost:3000/api/details";
-  final jwt = AuthService();
+  final String baseUrl = "${Config.baseUrl}/details";
+  final storage = const FlutterSecureStorage();
 
-  Future<int> inputDetails(String email, String department, String officeBuilding, String officeNumber) async {
-  final token = await jwt.getToken(); // Add token
-  
-  if (token == null) {
-    throw Exception('No authentication token found');
-  }
-  
-  final response = await http.post(
-    Uri.parse("$baseUrl/user-details"),
-    headers: {
-      'Authorization': 'Bearer $token', // Add this
-      'Content-Type': 'application/json'
-    },
-    body: jsonEncode({
-      "email": email,
-      "department": department,
-      "officeBuilding": officeBuilding,
-      "officeNumber": officeNumber
-    })
-  );
-  
-  if (response.statusCode == 201) {
-    await jwt.saveDetailsInput(true); // Add await
-    return response.statusCode;
-  } else {
-    throw Exception("Failed to register: ${response.body}");
-  }
-}
+  Future<int> inputDetails(
+    String email,
+    String department,
+    String officeBuilding,
+    String officeNumber,
+  ) async {
+    try {
+      final token = await storage.read(key: 'token');
+      final response = await http.post(
+        Uri.parse("$baseUrl/user-details"),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          "email": email,
+          "department": department,
+          "officeBuilding": officeBuilding,
+          "officeNumber": officeNumber,
+        }),
+      );
 
-  Future<List<String>> getLocations() async {
+      return response.statusCode;
+    } catch (err) {
+      throw Exception('Failed to input details: $err');
+    }
+  }
+
+  Future<List<String>> getLocationNames() async {
     try {
       final response = await http.get(
         Uri.parse("$baseUrl/locations"),
@@ -46,8 +47,7 @@ class DetailsApi {
         
         if (jsonResponse['success'] == true) {
           List<dynamic> data = jsonResponse['data'];
-          // Extract officeBuilding from each object
-          return data.map((item) => item['officeBuilding'] as String).toList();
+          return data.map((item) => item['Name'] as String).toList();
         } else {
           throw Exception(jsonResponse['error']['message']);
         }
@@ -60,7 +60,7 @@ class DetailsApi {
     }
   }
 
-  Future<List<String>> getDepartments() async {
+  Future<List<String>> getDepartmentNames() async {
     try {
       final response = await http.get(
         Uri.parse("$baseUrl/departments"),
@@ -84,35 +84,6 @@ class DetailsApi {
     }
   }
 
-  Future<Map<String, dynamic>> getLecturerDetails(String name) async {
-  try {
-    final token = await jwt.getToken(); // Add token
-    final response = await http.post(
-      Uri.parse("$baseUrl/lecturer"),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode({'name': name}),
-    );
-    
-    if (response.statusCode == 200) {
-      final jsonResponse = jsonDecode(response.body);
-      
-      if (jsonResponse['success'] == true) {
-        return jsonResponse['data'];
-      } else {
-        throw Exception(jsonResponse['error']['message']);
-      }
-    } else {
-      final jsonResponse = jsonDecode(response.body);
-      throw Exception(jsonResponse['error']['message'] ?? 'Failed to load lecturer details');
-    }
-  } catch (err) {
-    throw Exception('Failed to load lecturer details: $err');
-  }
-}
-
   Future<List<Map<String, dynamic>>> getLecturersAndLocations() async {
     try {
       final response = await http.get(
@@ -124,8 +95,6 @@ class DetailsApi {
         
         if (jsonResponse['success'] == true) {
           List<dynamic> data = jsonResponse['data'];
-          // Return the full list of objects
-          print(data.map((item) => item as Map<String, dynamic>).toList());
           return data.map((item) => item as Map<String, dynamic>).toList();
         } else {
           throw Exception(jsonResponse['error']['message']);
@@ -136,6 +105,35 @@ class DetailsApi {
       }
     } catch (err) {
       throw Exception('Failed to load lecturers and locations: $err');
+    }
+  }
+
+  Future<Map<String, dynamic>> getLecturerDetails(String name) async {
+    try {
+      final token = await storage.read(key: 'token');
+      final response = await http.post(
+        Uri.parse("$baseUrl/lecturer"),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'name': name}),
+      );
+      
+      if (response.statusCode == 200) {
+        final jsonResponse = jsonDecode(response.body);
+        
+        if (jsonResponse['success'] == true) {
+          return jsonResponse['data'];
+        } else {
+          throw Exception(jsonResponse['error']['message']);
+        }
+      } else {
+        final jsonResponse = jsonDecode(response.body);
+        throw Exception(jsonResponse['error']['message'] ?? 'Failed to load lecturer details');
+      }
+    } catch (err) {
+      throw Exception('Failed to load lecturer details: $err');
     }
   }
 }

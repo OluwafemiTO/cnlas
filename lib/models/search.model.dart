@@ -1,5 +1,5 @@
 class SearchableItem {
-  final String type; // "Lecturer" or "Location"
+  final String type;
   final String id;
   final String name;
   final String? email;
@@ -26,7 +26,6 @@ class SearchableItem {
     );
   }
 
-  // Combined searchable text for fuzzy matching
   String get searchableText {
     final parts = [
       name,

@@ -1,5 +1,6 @@
 import 'package:cnlas/apiService/auth.api.dart';
 import 'package:cnlas/apiService/details.api.dart';
+import 'package:cnlas/apiService/directions.api.dart';
 import 'package:cnlas/models/search.model.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -20,14 +21,19 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isLoadingLocation = false;
   final AuthAPI _authService = AuthAPI();
   final DetailsApi _detailService = DetailsApi();
+  final DirectionsService _directionsService = DirectionsService();
   String name = '';
   List<SearchableItem> allItems = [];
   List<SearchableItem> filteredItems = [];
   bool isLoadingData = false;
   TextEditingController searchController = TextEditingController();
-   // Add these for markers
   Set<Marker> markers = {};
+  Set<Polyline> polylines = {};
   BitmapDescriptor? customMarkerIcon;
+  bool isLoadingRoute = false;
+
+  String? routeDistance;
+  String? routeDuration;
 
   @override
   void initState() {
@@ -36,10 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
     requestLocationPermission();
     _getCurrentLocation();
     _loadSearchData();
-    _loadCustomMarker(); // Load custom marker icon
-
-
-    // Listen to search input
+    _loadCustomMarker();
     searchController.addListener(_onSearchChanged);
   }
 
@@ -71,19 +74,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       filteredItems = allItems.where((item) {
-        // Split query into words for better matching
         final queryWords = query.split(' ');
         final searchText = item.searchableText;
-
-        // Match if ANY word in query is found in searchable text
         return queryWords.any((word) => searchText.contains(word));
       }).toList();
 
-      // Sort by relevance (items that start with query first)
       filteredItems.sort((a, b) {
         final aStarts = a.searchableText.startsWith(query);
         final bStarts = b.searchableText.startsWith(query);
-
         if (aStarts && !bStarts) return -1;
         if (!aStarts && bStarts) return 1;
         return 0;
@@ -92,10 +90,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadCustomMarker() async {
-    customMarkerIcon = await BitmapDescriptor.asset(
-      const ImageConfiguration(size: Size(48, 48)),
-      'assets/marker.png', // Optional: add your own marker icon
-    );
+    try {
+      customMarkerIcon = await BitmapDescriptor.asset(
+        const ImageConfiguration(size: Size(48, 48)),
+        'assets/marker.png',
+      );
+    } catch (e) {
+      print('Custom marker not found: $e');
+    }
   }
 
   @override
@@ -107,25 +109,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _getName() async {
     final details = await _authService.getDetails();
-    name = details.name;
+    setState(() {
+      name = details.name;
+    });
   }
-
 
   Future<void> requestLocationPermission() async {
-  final status = await Permission.location.request();
-
-  if (!status.isGranted) {
-    throw Exception('Location permission denied');
+    final status = await Permission.location.request();
+    if (!status.isGranted) {
+      throw Exception('Location permission denied');
+    }
   }
-}
 
-
-  // Get user's current location
   Future<void> _getCurrentLocation() async {
     setState(() => isLoadingLocation = true);
 
     try {
-      // Check if location services are enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         _showMessage('Please enable location services');
@@ -133,7 +132,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // Check permissions
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -144,16 +142,13 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
 
-      // Get position
       Position position = await Geolocator.getCurrentPosition();
-      print("Lat: ${position.latitude}, Lng: ${position.longitude}");
 
       setState(() {
         currentPosition = position;
         isLoadingLocation = false;
       });
 
-      // Move camera to current location
       if (mapController != null) {
         mapController!.animateCamera(
           CameraUpdate.newLatLngZoom(
@@ -174,43 +169,38 @@ class _HomeScreenState extends State<HomeScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _handleLogout() async {
-    await authService.logout();
-    if (!mounted) return;
-    Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
-  }
-
   void _addMarker(SearchableItem item) {
     final lat = item.location['lat'];
     final lng = item.location['lng'];
-    
+
     if (lat == null || lng == null) return;
-    
+
     final marker = Marker(
       markerId: MarkerId(item.id),
       position: LatLng(lat, lng),
-      icon: customMarkerIcon ?? BitmapDescriptor.defaultMarkerWithHue(
-        item.type == 'Lecturer' 
-          ? BitmapDescriptor.hueBlue 
-          : BitmapDescriptor.hueRed,
-      ),
+      icon:
+          customMarkerIcon ??
+          BitmapDescriptor.defaultMarkerWithHue(
+            item.type == 'Lecturer'
+                ? BitmapDescriptor.hueBlue
+                : BitmapDescriptor.hueRed,
+          ),
       infoWindow: InfoWindow(
         title: item.name,
-        snippet: item.type == 'Lecturer' 
-          ? item.department 
-          : item.location['abbv'],
+        snippet: item.type == 'Lecturer'
+            ? item.department
+            : item.location['abbv'],
       ),
       onTap: () {
         _showDetailsBottomSheet(item);
       },
     );
-    
+
     setState(() {
-      markers.clear(); // Clear previous markers
+      markers.clear();
       markers.add(marker);
     });
-    
-    // Animate camera to marker
+
     if (mapController != null) {
       mapController!.animateCamera(
         CameraUpdate.newLatLngZoom(LatLng(lat, lng), 18),
@@ -219,10 +209,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showDetailsBottomSheet(SearchableItem item) {
-    // Add marker when showing bottom sheet
     _addMarker(item);
-
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -231,18 +218,129 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _navigateToLocation(SearchableItem item) {
+  Future<void> _navigateToLocation(SearchableItem item) async {
     final lat = item.location['lat'];
     final lng = item.location['lng'];
 
-    if (lat != null && lng != null && mapController != null) {
-      mapController!.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(lat, lng), 18),
-      );
-      
-      // TODO: Add route drawing logic here
-      _showMessage('Navigating to ${item.name}');
+    if (lat == null || lng == null) {
+      _showMessage('Location coordinates not available');
+      return;
     }
+
+    if (currentPosition == null) {
+      _showMessage('Current location not available. Please wait...');
+      return;
+    }
+
+    setState(() {
+      isLoadingRoute = true;
+    });
+
+    try {
+      final destination = LatLng(lat, lng);
+      final origin = LatLng(
+        currentPosition!.latitude,
+        currentPosition!.longitude,
+      );
+
+      print(
+        '🗺️ Getting route from ${origin.latitude},${origin.longitude} to ${destination.latitude},${destination.longitude}',
+      );
+
+      final directionsData = await _directionsService.getDirections(
+        origin: origin,
+        destination: destination,
+        mode: 'walking',
+      );
+
+      if (directionsData != null &&
+          directionsData['routes'] != null &&
+          directionsData['routes'].isNotEmpty) {
+        final route = directionsData['routes'][0];
+        final overviewPolyline = route['overview_polyline']['points'];
+        final leg = route['legs'][0];
+
+        final polylineCoordinates = _directionsService.decodePolyline(
+          overviewPolyline,
+        );
+
+        print('✅ Route decoded: ${polylineCoordinates.length} points');
+
+        final polyline = Polyline(
+          polylineId: const PolylineId('route'),
+          points: polylineCoordinates,
+          color: Colors.blue,
+          width: 5,
+          patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+        );
+
+        setState(() {
+          polylines.clear();
+          polylines.add(polyline);
+          routeDistance = leg['distance']['text'];
+          routeDuration = leg['duration']['text'];
+          isLoadingRoute = false;
+        });
+
+        _addDestinationMarker(item, destination);
+        _fitRouteInView(origin, destination);
+
+        _showMessage('Route: $routeDistance, $routeDuration');
+      } else {
+        setState(() {
+          isLoadingRoute = false;
+        });
+        _showMessage('No route found to ${item.name}');
+      }
+    } catch (e) {
+      setState(() {
+        isLoadingRoute = false;
+      });
+      print('❌ Error in _navigateToLocation: $e');
+      _showMessage('Error getting directions: ${e.toString()}');
+    }
+  }
+
+  void _addDestinationMarker(SearchableItem item, LatLng destination) {
+    final marker = Marker(
+      markerId: MarkerId('destination_${item.id}'),
+      position: destination,
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      infoWindow: InfoWindow(
+        title: item.name,
+        snippet: '$routeDistance • $routeDuration',
+      ),
+    );
+
+    setState(() {
+      markers.clear();
+      markers.add(marker);
+    });
+  }
+
+  void _fitRouteInView(LatLng origin, LatLng destination) {
+    if (mapController == null) return;
+
+    final bounds = LatLngBounds(
+      southwest: LatLng(
+        origin.latitude < destination.latitude
+            ? origin.latitude
+            : destination.latitude,
+        origin.longitude < destination.longitude
+            ? origin.longitude
+            : destination.longitude,
+      ),
+      northeast: LatLng(
+        origin.latitude > destination.latitude
+            ? origin.latitude
+            : destination.latitude,
+        origin.longitude > destination.longitude
+            ? origin.longitude
+            : destination.longitude,
+      ),
+    );
+
+    mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
   }
 
   Color getAvatarColor(String seed, {bool darker = false}) {
@@ -268,10 +366,9 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           _buildMapLayer(),
           _buildSearchBarLayer(),
-          _buildSearchResults(), // already done
+          _buildSearchResults(),
         ],
       ),
-      // Floating button to recenter on location
       floatingActionButton: FloatingActionButton(
         onPressed: _getCurrentLocation,
         child: const Icon(Icons.my_location),
@@ -280,22 +377,30 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildMapLayer() {
-    return GoogleMap( 
-      onMapCreated: (controller) { 
-        mapController = controller; 
-      }, 
-    initialCameraPosition: CameraPosition(
+    return GoogleMap(
+      onMapCreated: (controller) {
+        mapController = controller;
+      },
+      onTap: (LatLng position) {
+        FocusScope.of(context).unfocus();
+
+        setState(() {
+          markers.clear();
+          polylines.clear();
+          routeDistance = null;
+          routeDuration = null;
+        });
+      },
+      initialCameraPosition: CameraPosition(
         target: currentPosition != null
-            ? LatLng(
-                currentPosition!.latitude,
-                currentPosition!.longitude,
-              )
+            ? LatLng(currentPosition!.latitude, currentPosition!.longitude)
             : const LatLng(0, 0),
         zoom: 16,
       ),
-      myLocationEnabled: true, 
+      myLocationEnabled: true,
       myLocationButtonEnabled: false,
-      markers: markers, // Add this line to display markers
+      markers: markers,
+      polylines: polylines,
     );
   }
 
@@ -305,7 +410,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Positioned(
-      top: 110, // below search bar
+      top: 110,
       left: 16,
       right: 16,
       child: Material(
@@ -330,19 +435,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       : item.location['abbv'] ?? '',
                 ),
                 onTap: () {
-                  final lat = item.location['lat'];
-                  final lng = item.location['lng'];
-
-                  if (lat != null && lng != null && mapController != null) {
-                    mapController!.animateCamera(
-                      CameraUpdate.newLatLngZoom(LatLng(lat, lng), 18),
-                    );
-                  }
-
-                  searchController.clear();
                   FocusScope.of(context).unfocus();
+                  searchController.clear();
 
-                  // Show bottom sheet instead of just navigating
                   _showDetailsBottomSheet(item);
                 },
               );
@@ -375,7 +470,7 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.only(right: 8.0),
               child: GestureDetector(
                 onTap: () {
-                  print("hello");
+                  Navigator.pushNamed(context, '/profile');
                 },
                 child: CircleAvatar(
                   backgroundColor: getAvatarColor(name),
@@ -395,10 +490,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-
   Widget _buildBottomSheetContent(SearchableItem item) {
     final isLecturer = item.type == 'Lecturer';
-    
+
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -412,7 +506,6 @@ class _HomeScreenState extends State<HomeScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Drag handle
           Center(
             child: Container(
               width: 40,
@@ -424,8 +517,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          
-          // Icon and Type
+
           Row(
             children: [
               CircleAvatar(
@@ -451,24 +543,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     Text(
                       item.type,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
           const Divider(),
           const SizedBox(height: 16),
-          
-          // Details section
+
           if (isLecturer) ...[
-            // Fetch and display availability
             FutureBuilder<Map<String, dynamic>>(
               future: _detailService.getLecturerDetails(item.name),
               builder: (context, snapshot) {
@@ -480,18 +567,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   );
                 }
-                
+
                 if (snapshot.hasError) {
                   return Text(
                     'Error loading details',
                     style: TextStyle(color: Colors.red[600]),
                   );
                 }
-                
+
                 final data = snapshot.data!;
                 final availability = data['availability'];
                 final isAvailable = availability['status'] == 'AVAILABLE';
-                
+
                 return Column(
                   children: [
                     _buildDetailRow(
@@ -535,19 +622,30 @@ class _HomeScreenState extends State<HomeScreen> {
               item.location['abbv'] ?? 'N/A',
             ),
           ],
-          
           const SizedBox(height: 24),
-          
-          // Directions button
+
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(context);
-                _navigateToLocation(item);
-              },
-              icon: const Icon(Icons.directions),
-              label: const Text('Get Directions'),
+              onPressed: isLoadingRoute
+                  ? null
+                  : () {
+                      Navigator.pop(context);
+                      _navigateToLocation(item);
+                    },
+              icon: isLoadingRoute
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.directions),
+              label: Text(
+                isLoadingRoute ? 'Loading Route...' : 'Get Directions',
+              ),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -556,14 +654,19 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          
+
           const SizedBox(height: 16),
         ],
       ),
     );
   }
 
-  Widget _buildDetailRow(IconData icon, String label, String value, {Color? valueColor}) {
+  Widget _buildDetailRow(
+    IconData icon,
+    String label,
+    String value, {
+    Color? valueColor,
+  }) {
     return Row(
       children: [
         Icon(icon, size: 20, color: Colors.grey[600]),
@@ -574,10 +677,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Text(
                 label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
               const SizedBox(height: 2),
               Text(
@@ -594,5 +694,4 @@ class _HomeScreenState extends State<HomeScreen> {
       ],
     );
   }
-
 }

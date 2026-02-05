@@ -2,11 +2,11 @@ import 'dart:convert';
 import 'package:cnlas/models/UserDetails.model.dart';
 import 'package:cnlas/models/user.model.dart';
 import 'package:cnlas/util/authService.util.dart';
+import 'package:cnlas/config/config.dart';
 import 'package:http/http.dart' as http;
 
-
 class AuthAPI {
-  final String baseUrl = "http://localhost:3000/api/auth";
+  final String baseUrl = "${Config.baseUrl}/auth";
   final AuthService jwt = AuthService();
 
   Future<User> registerUser(String name, String email, String password) async {
@@ -19,10 +19,10 @@ class AuthAPI {
         "password": password,
       }),
     );
+    
     if (response.statusCode == 201) {
       final data = jsonDecode(response.body);
       final token = data['data']["token"];
-
       jwt.saveToken(token);
       return User.fromJson(data['data']);
     } else {
@@ -80,7 +80,7 @@ class AuthAPI {
     }
   }
 
-  Future<void> logout () async{
-    jwt.clearToken();
+  Future<void> logout() async {
+    await jwt.clearToken();
   }
 }
