@@ -40,10 +40,7 @@ class _SignupScreenState extends State<SignupScreen> {
           ),
         );
       } else {
-        // maybe navigate somewhere else
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Registration successful")),
-        );
+        Navigator.pushReplacementNamed(context, "/home");
       }
     } catch (e) {
       if (!mounted) return;
