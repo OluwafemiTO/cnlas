@@ -147,6 +147,7 @@ class _InputDetailsScreenState extends State<InputDetailsScreen> {
       });
 
       if (statusCode == 201) {
+        jwt.saveDetailsInput(true);
         Navigator.pushReplacementNamed(context, '/home');
       } else {
         ScaffoldMessenger.of(context).showSnackBar(

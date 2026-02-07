@@ -1,12 +1,11 @@
 import 'dart:convert';
 import 'package:cnlas/config/config.dart';
-// import 'package:cnlas/util/authService.util.dart';
+import 'package:cnlas/util/authService.util.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class DetailsApi {
   final String baseUrl = "${Config.baseUrl}/details";
-  final storage = const FlutterSecureStorage();
+  final storage = AuthService();
 
   Future<int> inputDetails(
     String email,
@@ -15,7 +14,8 @@ class DetailsApi {
     String officeNumber,
   ) async {
     try {
-      final token = await storage.read(key: 'token');
+      final token = await storage.getToken();
+      print(token);
       final response = await http.post(
         Uri.parse("$baseUrl/user-details"),
         headers: {
@@ -110,7 +110,7 @@ class DetailsApi {
 
   Future<Map<String, dynamic>> getLecturerDetails(String name) async {
     try {
-      final token = await storage.read(key: 'token');
+      final token = await storage.getToken();
       final response = await http.post(
         Uri.parse("$baseUrl/lecturer"),
         headers: {
