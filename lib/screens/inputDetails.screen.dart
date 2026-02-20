@@ -47,8 +47,8 @@ class _InputDetailsScreenState extends State<InputDetailsScreen> {
   Future<void> _loadDropdownData() async {
     try {
       // Fetch both locations and departments
-      final locationsResponse = await detailsService.getLocations();
-      final departmentsResponse = await detailsService.getDepartments();
+      final locationsResponse = await detailsService.getLocationNames();
+      final departmentsResponse = await detailsService.getDepartmentNames();
 
       if (!mounted) return;
 

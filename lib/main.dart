@@ -1,4 +1,5 @@
 import 'package:cnlas/screens/home.screen.dart';
+import 'package:cnlas/screens/profile.screen.dart';
 import 'package:flutter/material.dart';
 import 'package:cnlas/util/theme.dart';
 import 'package:cnlas/screens/login.screen.dart';
@@ -26,7 +27,8 @@ class MyApp extends StatelessWidget {
         '/': (context) => SplashScreen(),
         '/login': (context) => LoginScreen(),
         '/signUp': (context) => SignupScreen(),
-        '/home': (context) => HomeScreen()
+        '/home': (context) => HomeScreen(),
+        '/profile': (context) => ProfileScreen()
       },
     );
     

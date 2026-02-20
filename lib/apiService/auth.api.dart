@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:cnlas/config/config.dart';
 import 'package:cnlas/models/UserDetails.model.dart';
 import 'package:cnlas/models/user.model.dart';
 import 'package:cnlas/util/authService.util.dart';
@@ -6,7 +7,7 @@ import 'package:http/http.dart' as http;
 
 
 class AuthAPI {
-  final String baseUrl = "http://localhost:3000/api/auth";
+  final String baseUrl = "${Config.baseUrl}/auth";
   final AuthService jwt = AuthService();
 
   Future<User> registerUser(String name, String email, String password) async {

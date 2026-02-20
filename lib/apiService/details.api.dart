@@ -1,9 +1,10 @@
 import 'dart:convert';
+import 'package:cnlas/config/config.dart';
 import 'package:cnlas/util/authService.util.dart';
 import 'package:http/http.dart' as http;
 
 class DetailsApi {
-  final String baseUrl = "http://localhost:3000/api/details";
+  final String baseUrl = "${Config.baseUrl}/details";
   final jwt = AuthService();
 
   Future<int> inputDetails(String email, String department, String officeBuilding, String officeNumber) async {
@@ -35,54 +36,57 @@ class DetailsApi {
   }
 }
 
-  Future<List<String>> getLocations() async {
-    try {
-      final response = await http.get(
-        Uri.parse("$baseUrl/locations"),
-      );
-      
-      if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(response.body);
-        
-        if (jsonResponse['success'] == true) {
-          List<dynamic> data = jsonResponse['data'];
-          // Extract officeBuilding from each object
-          return data.map((item) => item['officeBuilding'] as String).toList();
-        } else {
-          throw Exception(jsonResponse['error']['message']);
-        }
-      } else {
-        final jsonResponse = jsonDecode(response.body);
-        throw Exception(jsonResponse['error']['message'] ?? 'Failed to load locations');
-      }
-    } catch (err) {
-      throw Exception('Failed to load locations: $err');
-    }
-  }
+  // Update these methods to match the TypeScript response structure
 
-  Future<List<String>> getDepartments() async {
-    try {
-      final response = await http.get(
-        Uri.parse("$baseUrl/departments"),
-      );
+Future<List<String>> getLocationNames() async {
+  try {
+    final response = await http.get(
+      Uri.parse("$baseUrl/locations"),
+    );
+    
+    if (response.statusCode == 200) {
+      final jsonResponse = jsonDecode(response.body);
       
-      if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(response.body);
-        
-        if (jsonResponse['success'] == true) {
-          List<dynamic> data = jsonResponse['data'];
-          return data.map((item) => item.toString()).toList();
-        } else {
-          throw Exception(jsonResponse['error']['message']);
-        }
+      if (jsonResponse['success'] == true) {
+        List<dynamic> data = jsonResponse['data'];
+        // Extract the 'Name' field which corresponds to officeBuilding
+        return data.map((item) => item['Name'] as String).toList();
       } else {
-        final jsonResponse = jsonDecode(response.body);
-        throw Exception(jsonResponse['error']['message'] ?? 'Failed to load departments');
+        throw Exception(jsonResponse['error']['message']);
       }
-    } catch (err) {
-      throw Exception('Failed to load departments: $err');
+    } else {
+      final jsonResponse = jsonDecode(response.body);
+      throw Exception(jsonResponse['error']['message'] ?? 'Failed to load locations');
     }
+  } catch (err) {
+    throw Exception('Failed to load locations: $err');
   }
+}
+
+Future<List<String>> getDepartmentNames() async {
+  try {
+    final response = await http.get(
+      Uri.parse("$baseUrl/departments"),
+    );
+    
+    if (response.statusCode == 200) {
+      final jsonResponse = jsonDecode(response.body);
+      
+      if (jsonResponse['success'] == true) {
+        List<dynamic> data = jsonResponse['data'];
+        // TypeScript returns simple array of strings: ["Computer Science", "Mathematics", ...]
+        return data.map((item) => item.toString()).toList();
+      } else {
+        throw Exception(jsonResponse['error']['message']);
+      }
+    } else {
+      final jsonResponse = jsonDecode(response.body);
+      throw Exception(jsonResponse['error']['message'] ?? 'Failed to load departments');
+    }
+  } catch (err) {
+    throw Exception('Failed to load departments: $err');
+  }
+}
 
   Future<Map<String, dynamic>> getLecturerDetails(String name) async {
   try {
