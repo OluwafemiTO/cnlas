@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cnlas/apiService/auth.api.dart';
 import 'package:cnlas/apiService/details.api.dart';
 import 'package:cnlas/apiService/directions.api.dart';
@@ -31,10 +33,21 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<Polyline> polylines = {};
   BitmapDescriptor? customMarkerIcon;
   bool isLoadingRoute = false;
-
+  
+  // Route options
+  List<RouteOption>? availableRoutes;
+  int? selectedRouteIndex;
+  
+  // Navigation state
+  bool isNavigating = false;
+  SearchableItem? navigationTarget;
+  StreamSubscription<Position>? positionStream;
+  LatLng? destinationLatLng;
+  
   String? routeDistance;
   String? routeDuration;
-
+  double? remainingDistance; // in meters
+  
   @override
   void initState() {
     super.initState();
@@ -100,12 +113,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    searchController.removeListener(_onSearchChanged);
-    searchController.dispose();
-    super.dispose();
-  }
+  // @override
+  // void dispose() {
+  //   searchController.removeListener(_onSearchChanged);
+  //   searchController.dispose();
+  //   super.dispose();
+  // }
 
   Future<void> _getName() async {
     final details = await _authService.getDetails();
@@ -169,39 +182,39 @@ class _HomeScreenState extends State<HomeScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _addMarker(SearchableItem item) {
+   void _addMarker(SearchableItem item) {
     final lat = item.location['lat'];
     final lng = item.location['lng'];
-
+    
     if (lat == null || lng == null) return;
-
+    
     final marker = Marker(
       markerId: MarkerId(item.id),
       position: LatLng(lat, lng),
-      icon:
-          customMarkerIcon ??
-          BitmapDescriptor.defaultMarkerWithHue(
-            item.type == 'Lecturer'
-                ? BitmapDescriptor.hueBlue
-                : BitmapDescriptor.hueRed,
-          ),
+      icon: customMarkerIcon ?? BitmapDescriptor.defaultMarkerWithHue(
+        item.type == 'Lecturer' 
+          ? BitmapDescriptor.hueBlue 
+          : BitmapDescriptor.hueRed,
+      ),
       infoWindow: InfoWindow(
         title: item.name,
-        snippet: item.type == 'Lecturer'
-            ? item.department
-            : item.location['abbv'],
+        snippet: item.type == 'Lecturer' 
+          ? item.department 
+          : item.location['abbv'],
       ),
       onTap: () {
-        _showDetailsBottomSheet(item);
+        if (!isNavigating) {
+          _showDetailsBottomSheet(item);
+        }
       },
     );
-
+    
     setState(() {
       markers.clear();
       markers.add(marker);
     });
-
-    if (mapController != null) {
+    
+    if (mapController != null && !isNavigating) {
       mapController!.animateCamera(
         CameraUpdate.newLatLngZoom(LatLng(lat, lng), 18),
       );
@@ -214,8 +227,145 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      isDismissible: !isNavigating,
+      enableDrag: !isNavigating,
       builder: (context) => _buildBottomSheetContent(item),
     );
+  }
+
+  // Start live navigation
+  void _startNavigation() {
+    if (currentPosition == null || destinationLatLng == null) return;
+
+    setState(() {
+      isNavigating = true;
+    });
+
+    // Listen to position changes
+    const locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 10, // Update every 10 meters
+    );
+
+    positionStream = Geolocator.getPositionStream(locationSettings: locationSettings)
+        .listen((Position position) {
+      setState(() {
+        currentPosition = position;
+      });
+
+      _updateNavigationRoute(position);
+      _checkArrival(position);
+    });
+  }
+
+  void _updateNavigationRoute(Position position) async {
+    if (destinationLatLng == null || availableRoutes == null) return;
+
+    final origin = LatLng(position.latitude, position.longitude);
+
+    // Calculate remaining distance
+    final distance = Geolocator.distanceBetween(
+      position.latitude,
+      position.longitude,
+      destinationLatLng!.latitude,
+      destinationLatLng!.longitude,
+    );
+
+    setState(() {
+      remainingDistance = distance;
+    });
+
+    // Update route if moved significantly (every ~50 meters)
+    if (distance > 50 && selectedRouteIndex != null) {
+      try {
+        final routes = await _directionsService.getDirections(
+          origin: origin,
+          destination: destinationLatLng!,
+          mode: 'walking',
+        );
+
+        if (routes != null && routes.isNotEmpty) {
+          setState(() {
+            availableRoutes = routes;
+          });
+          _redrawRoute();
+        }
+      } catch (e) {
+        print('Error updating route: $e');
+      }
+    }
+
+    // Keep camera following user
+    if (mapController != null) {
+      mapController!.animateCamera(
+        CameraUpdate.newLatLng(origin),
+      );
+    }
+  }
+
+  void _checkArrival(Position position) {
+    if (destinationLatLng == null) return;
+
+    final distance = Geolocator.distanceBetween(
+      position.latitude,
+      position.longitude,
+      destinationLatLng!.latitude,
+      destinationLatLng!.longitude,
+    );
+
+    // If within 20 meters of destination
+    if (distance < 20) {
+      _arriveAtDestination();
+    }
+  }
+
+  void _arriveAtDestination() {
+    _showMessage('🎉 You have arrived at your destination!');
+    _stopNavigation();
+  }
+
+  void _stopNavigation() {
+    positionStream?.cancel();
+    positionStream = null;
+
+    setState(() {
+      isNavigating = false;
+      navigationTarget = null;
+      destinationLatLng = null;
+      availableRoutes = null;
+      selectedRouteIndex = null;
+      remainingDistance = null;
+      polylines.clear();
+      markers.clear();
+    });
+  }
+
+  void _redrawRoute() {
+    if (availableRoutes == null || selectedRouteIndex == null) return;
+
+    polylines.clear();
+
+    for (int i = 0; i < availableRoutes!.length; i++) {
+      final route = availableRoutes![i];
+      final isSelected = i == selectedRouteIndex;
+      
+      polylines.add(
+        Polyline(
+          polylineId: PolylineId('route_$i'),
+          points: route.polylinePoints,
+          color: isSelected ? Colors.blue : Colors.grey,
+          width: isSelected ? 6 : 4,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          jointType: JointType.round,
+          patterns: isSelected 
+            ? []
+            : [PatternItem.dash(10), PatternItem.gap(10)],
+        ),
+      );
+    }
+
+    setState(() {});
   }
 
   Future<void> _navigateToLocation(SearchableItem item) async {
@@ -234,6 +384,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       isLoadingRoute = true;
+      availableRoutes = null;
+      selectedRouteIndex = null;
+      navigationTarget = item;
+      destinationLatLng = LatLng(lat, lng);
     });
 
     try {
@@ -243,49 +397,27 @@ class _HomeScreenState extends State<HomeScreen> {
         currentPosition!.longitude,
       );
 
-      print(
-        '🗺️ Getting route from ${origin.latitude},${origin.longitude} to ${destination.latitude},${destination.longitude}',
-      );
+      print('🗺️ Getting routes...');
 
-      final directionsData = await _directionsService.getDirections(
+      final routes = await _directionsService.getDirections(
         origin: origin,
         destination: destination,
         mode: 'walking',
       );
 
-      if (directionsData != null &&
-          directionsData['routes'] != null &&
-          directionsData['routes'].isNotEmpty) {
-        final route = directionsData['routes'][0];
-        final overviewPolyline = route['overview_polyline']['points'];
-        final leg = route['legs'][0];
-
-        final polylineCoordinates = _directionsService.decodePolyline(
-          overviewPolyline,
-        );
-
-        print('✅ Route decoded: ${polylineCoordinates.length} points');
-
-        final polyline = Polyline(
-          polylineId: const PolylineId('route'),
-          points: polylineCoordinates,
-          color: Colors.blue,
-          width: 5,
-          patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-        );
-
+      if (routes != null && routes.isNotEmpty) {
         setState(() {
-          polylines.clear();
-          polylines.add(polyline);
-          routeDistance = leg['distance']['text'];
-          routeDuration = leg['duration']['text'];
+          availableRoutes = routes;
+          selectedRouteIndex = 0;
           isLoadingRoute = false;
         });
 
-        _addDestinationMarker(item, destination);
-        _fitRouteInView(origin, destination);
-
-        _showMessage('Route: $routeDistance, $routeDuration');
+        _displayRoute(0, item, destination);
+        _startNavigation();
+        
+        if (routes.length > 1) {
+          _showRouteSelectionSheet(item, destination);
+        }
       } else {
         setState(() {
           isLoadingRoute = false;
@@ -296,9 +428,127 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         isLoadingRoute = false;
       });
-      print('❌ Error in _navigateToLocation: $e');
+      print('❌ Error: $e');
       _showMessage('Error getting directions: ${e.toString()}');
     }
+  }
+
+  void _displayRoute(int routeIndex, SearchableItem item, LatLng destination) {
+    if (availableRoutes == null || routeIndex >= availableRoutes!.length) return;
+
+    final selectedRoute = availableRoutes![routeIndex];
+    
+    polylines.clear();
+
+    for (int i = 0; i < availableRoutes!.length; i++) {
+      final route = availableRoutes![i];
+      final isSelected = i == routeIndex;
+      
+      polylines.add(
+        Polyline(
+          polylineId: PolylineId('route_$i'),
+          points: route.polylinePoints,
+          color: isSelected ? Colors.blue : Colors.grey,
+          width: isSelected ? 6 : 4,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          jointType: JointType.round,
+          patterns: isSelected 
+            ? []
+            : [PatternItem.dash(10), PatternItem.gap(10)],
+        ),
+      );
+    }
+
+    setState(() {
+      selectedRouteIndex = routeIndex;
+      routeDistance = selectedRoute.distance;
+      routeDuration = selectedRoute.duration;
+    });
+
+    _addDestinationMarker(item, destination);
+    
+    if (!isNavigating) {
+      _fitRouteInView(
+        LatLng(currentPosition!.latitude, currentPosition!.longitude),
+        destination,
+      );
+    }
+  }
+
+  void _showRouteSelectionSheet(SearchableItem item, LatLng destination) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      isDismissible: !isNavigating,
+      enableDrag: !isNavigating,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Choose a route',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ...availableRoutes!.asMap().entries.map((entry) {
+              final index = entry.key;
+              final route = entry.value;
+              final isSelected = index == selectedRouteIndex;
+              
+              return Card(
+                elevation: isSelected ? 4 : 1,
+                color: isSelected ? Colors.blue.shade50 : Colors.white,
+                margin: const EdgeInsets.only(bottom: 12),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: isSelected ? Colors.blue : Colors.grey,
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  title: Text(
+                    route.summary,
+                    style: TextStyle(
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  subtitle: Text('${route.duration} (${route.distance})'),
+                  trailing: isSelected
+                    ? const Icon(Icons.check_circle, color: Colors.blue)
+                    : null,
+                  onTap: () {
+                    setState(() {
+                      selectedRouteIndex = index;
+                    });
+                    _displayRoute(index, item, destination);
+                    Navigator.pop(context);
+                  },
+                ),
+              );
+            }).toList(),
+          ],
+        ),
+      ),
+    );
   }
 
   void _addDestinationMarker(SearchableItem item, LatLng destination) {
@@ -308,7 +558,9 @@ class _HomeScreenState extends State<HomeScreen> {
       icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
       infoWindow: InfoWindow(
         title: item.name,
-        snippet: '$routeDistance • $routeDuration',
+        snippet: remainingDistance != null 
+          ? '${(remainingDistance! / 1000).toStringAsFixed(1)} km away'
+          : '$routeDistance • $routeDuration',
       ),
     );
 
@@ -323,24 +575,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final bounds = LatLngBounds(
       southwest: LatLng(
-        origin.latitude < destination.latitude
-            ? origin.latitude
-            : destination.latitude,
-        origin.longitude < destination.longitude
-            ? origin.longitude
-            : destination.longitude,
+        origin.latitude < destination.latitude ? origin.latitude : destination.latitude,
+        origin.longitude < destination.longitude ? origin.longitude : destination.longitude,
       ),
       northeast: LatLng(
-        origin.latitude > destination.latitude
-            ? origin.latitude
-            : destination.latitude,
-        origin.longitude > destination.longitude
-            ? origin.longitude
-            : destination.longitude,
+        origin.latitude > destination.latitude ? origin.latitude : destination.latitude,
+        origin.longitude > destination.longitude ? origin.longitude : destination.longitude,
       ),
     );
 
-    mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
+    mapController!.animateCamera(
+      CameraUpdate.newLatLngBounds(bounds, 100),
+    );
+  }
+
+  String _formatDistance(double meters) {
+    if (meters < 1000) {
+      return '${meters.round()} m';
+    } else {
+      return '${(meters / 1000).toStringAsFixed(1)} km';
+    }
   }
 
   Color getAvatarColor(String seed, {bool darker = false}) {
@@ -365,13 +619,155 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Stack(
         children: [
           _buildMapLayer(),
-          _buildSearchBarLayer(),
-          _buildSearchResults(),
+          if (!isNavigating) _buildSearchBarLayer(),
+          if (!isNavigating) _buildSearchResults(),
+          if (isNavigating) _buildNavigationInfo(),
+          if (availableRoutes != null && availableRoutes!.length > 1 && !isNavigating)
+            _buildRouteToggleButton(),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _getCurrentLocation,
-        child: const Icon(Icons.my_location),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          if (isNavigating)
+            FloatingActionButton(
+              heroTag: 'stop',
+              onPressed: _showStopNavigationDialog,
+              backgroundColor: Colors.red,
+              child: const Icon(Icons.close),
+            ),
+          const SizedBox(height: 16),
+          FloatingActionButton(
+            heroTag: 'location',
+            onPressed: _getCurrentLocation,
+            child: const Icon(Icons.my_location),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showStopNavigationDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Stop Navigation'),
+        content: const Text('Are you sure you want to stop navigation?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _stopNavigation();
+            },
+            child: const Text('Stop', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavigationInfo() {
+    return Positioned(
+      top: 50,
+      left: 16,
+      right: 16,
+      child: Material(
+        elevation: 6,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.navigation, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      navigationTarget?.name ?? 'Navigating...',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Distance',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        Text(
+                          remainingDistance != null 
+                            ? _formatDistance(remainingDistance!)
+                            : routeDistance ?? '--',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Est. Time',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        Text(
+                          routeDuration ?? '--',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRouteToggleButton() {
+    return Positioned(
+      bottom: 100,
+      right: 16,
+      child: FloatingActionButton.extended(
+        onPressed: () {
+          if (navigationTarget != null && destinationLatLng != null) {
+            _showRouteSelectionSheet(navigationTarget!, destinationLatLng!);
+          }
+        },
+        icon: const Icon(Icons.alt_route),
+        label: Text('${availableRoutes!.length} routes'),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.blue,
       ),
     );
   }
@@ -381,19 +777,27 @@ class _HomeScreenState extends State<HomeScreen> {
       onMapCreated: (controller) {
         mapController = controller;
       },
-      onTap: (LatLng position) {
+      onTap: isNavigating ? null : (LatLng position) {
         FocusScope.of(context).unfocus();
-
-        setState(() {
-          markers.clear();
-          polylines.clear();
-          routeDistance = null;
-          routeDuration = null;
-        });
+        
+        // Only clear if not navigating
+        if (!isNavigating) {
+          setState(() {
+            markers.clear();
+            polylines.clear();
+            availableRoutes = null;
+            selectedRouteIndex = null;
+            routeDistance = null;
+            routeDuration = null;
+          });
+        }
       },
       initialCameraPosition: CameraPosition(
         target: currentPosition != null
-            ? LatLng(currentPosition!.latitude, currentPosition!.longitude)
+            ? LatLng(
+                currentPosition!.latitude,
+                currentPosition!.longitude,
+              )
             : const LatLng(0, 0),
         zoom: 16,
       ),
@@ -401,6 +805,12 @@ class _HomeScreenState extends State<HomeScreen> {
       myLocationButtonEnabled: false,
       markers: markers,
       polylines: polylines,
+      zoomControlsEnabled: false,
+      compassEnabled: true,
+      rotateGesturesEnabled: true,
+      scrollGesturesEnabled: true,
+      tiltGesturesEnabled: true,
+      zoomGesturesEnabled: true,
     );
   }
 
@@ -437,7 +847,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: () {
                   FocusScope.of(context).unfocus();
                   searchController.clear();
-
+                  
                   _showDetailsBottomSheet(item);
                 },
               );
@@ -492,7 +902,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildBottomSheetContent(SearchableItem item) {
     final isLecturer = item.type == 'Lecturer';
-
+    
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -517,7 +927,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-
+          
           Row(
             children: [
               CircleAvatar(
@@ -536,25 +946,29 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Text(
                       item.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
+                        color: Colors.grey[600],
                       ),
                     ),
                     Text(
                       item.type,
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-
+          
           const SizedBox(height: 24),
           const Divider(),
           const SizedBox(height: 16),
-
+          
           if (isLecturer) ...[
             FutureBuilder<Map<String, dynamic>>(
               future: _detailService.getLecturerDetails(item.name),
@@ -567,18 +981,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   );
                 }
-
+                
                 if (snapshot.hasError) {
                   return Text(
                     'Error loading details',
                     style: TextStyle(color: Colors.red[600]),
                   );
                 }
-
+                
                 final data = snapshot.data!;
                 final availability = data['availability'];
                 final isAvailable = availability['status'] == 'AVAILABLE';
-
+                
                 return Column(
                   children: [
                     _buildDetailRow(
@@ -622,8 +1036,9 @@ class _HomeScreenState extends State<HomeScreen> {
               item.location['abbv'] ?? 'N/A',
             ),
           ],
+          
           const SizedBox(height: 24),
-
+          
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -643,9 +1058,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     )
                   : const Icon(Icons.directions),
-              label: Text(
-                isLoadingRoute ? 'Loading Route...' : 'Get Directions',
-              ),
+              label: Text(isLoadingRoute ? 'Loading Routes...' : 'Start Navigation'),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -654,19 +1067,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-
+          
           const SizedBox(height: 16),
         ],
       ),
     );
   }
 
-  Widget _buildDetailRow(
-    IconData icon,
-    String label,
-    String value, {
-    Color? valueColor,
-  }) {
+  Widget _buildDetailRow(IconData icon, String label, String value, {Color? valueColor}) {
     return Row(
       children: [
         Icon(icon, size: 20, color: Colors.grey[600]),
@@ -677,7 +1085,10 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Text(
                 label,
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                ),
               ),
               const SizedBox(height: 2),
               Text(

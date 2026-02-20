@@ -2,20 +2,39 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+class RouteOption {
+  final String summary;
+  final String distance;
+  final String duration;
+  final List<LatLng> polylinePoints;
+  final int durationValue; // in seconds
+  final int distanceValue; // in meters
+
+  RouteOption({
+    required this.summary,
+    required this.distance,
+    required this.duration,
+    required this.polylinePoints,
+    required this.durationValue,
+    required this.distanceValue,
+  });
+}
+
 class DirectionsService {
   static const String _baseUrl = 'https://maps.googleapis.com/maps/api/directions/json';
   static const String _apiKey = 'AIzaSyAdeKcM86fx8I-XF7KWCzpkfad_HCfmvWE'; // Replace with your API key
 
-  Future<Map<String, dynamic>?> getDirections({
+  Future<List<RouteOption>?> getDirections({
     required LatLng origin,
     required LatLng destination,
-    String mode = 'walking',
+    String mode = 'driving',
   }) async {
     try {
       final url = Uri.parse(
         '$_baseUrl?origin=${origin.latitude},${origin.longitude}'
         '&destination=${destination.latitude},${destination.longitude}'
         '&mode=$mode'
+        '&alternatives=true' // Request alternative routes
         '&key=$_apiKey',
       );
 
@@ -34,13 +53,42 @@ class DirectionsService {
         print('📦 API Response Status: ${data['status']}');
         
         if (data['status'] == 'OK') {
-          print('✅ Directions retrieved successfully');
-          return data;
+          final routes = data['routes'] as List;
+          print('✅ Found ${routes.length} route(s)');
+          
+          List<RouteOption> routeOptions = [];
+          
+          for (int i = 0; i < routes.length; i++) {
+            final route = routes[i];
+            final leg = route['legs'][0];
+            final overviewPolyline = route['overview_polyline']['points'];
+            
+            // Get route summary (via which roads/streets)
+            String summary = route['summary'] ?? 'Route ${i + 1}';
+            if (summary.isEmpty) {
+              summary = 'Route ${i + 1}';
+            }
+            
+            final polylinePoints = decodePolyline(overviewPolyline);
+            
+            routeOptions.add(RouteOption(
+              summary: summary,
+              distance: leg['distance']['text'],
+              duration: leg['duration']['text'],
+              polylinePoints: polylinePoints,
+              durationValue: leg['duration']['value'],
+              distanceValue: leg['distance']['value'],
+            ));
+          }
+          
+          // Sort by duration (fastest first)
+          routeOptions.sort((a, b) => a.durationValue.compareTo(b.durationValue));
+          
+          return routeOptions;
         } else {
           print('❌ Google Directions API Error:');
           print('Status: ${data['status']}');
           print('Error Message: ${data['error_message'] ?? 'No error message'}');
-          print('Available Routes: ${data['routes']?.length ?? 0}');
           
           throw Exception('Directions API error: ${data['status']} - ${data['error_message'] ?? "Unknown error"}');
         }
