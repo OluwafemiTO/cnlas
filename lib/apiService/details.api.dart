@@ -3,7 +3,7 @@ import 'package:cnlas/util/authService.util.dart';
 import 'package:http/http.dart' as http;
 
 class DetailsApi {
-  final String baseUrl = "https://cnlas-api.onrender.com/apir/details";
+  final String baseUrl = "https://cnlas-api.onrender.com/api/details";
   final storage = AuthService();
 
   Future<int> inputDetails(
